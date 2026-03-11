@@ -16,27 +16,40 @@ const WalletContext = createContext<WalletContextType>({
   disconnect: () => {},
 });
 
+function isMobileBrowser() {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+}
+
+function openMetaMaskDeepLink() {
+  if (typeof window === "undefined") return;
+  const dappUrl = `${window.location.host}${window.location.pathname}${window.location.search}`;
+  const deepLink = `https://metamask.app.link/dapp/${dappUrl}`;
+  window.location.href = deepLink;
+}
+
 export function WalletProvider({ children }: { children: ReactNode }) {
   const [address, setAddress] = useState<string | null>(null);
 
   const connect = useCallback(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const eth = typeof window !== "undefined" ? (window as any).ethereum : null;
+
     if (eth) {
       try {
-        const accounts = await eth.request({
-          method: "eth_requestAccounts",
-        });
-        if (accounts.length > 0) {
+        const accounts = await eth.request({ method: "eth_requestAccounts" });
+        if (accounts?.length > 0) {
           setAddress(accounts[0]);
         }
       } catch {
-        // User rejected or no provider — use mock address for demo
-        setAddress("0x1a2B3c4D5e6F7890AbCdEf1234567890aBcDeF12");
+        // user rejected request; keep disconnected
       }
-    } else {
-      // No wallet extension — use mock address for demo
-      setAddress("0x1a2B3c4D5e6F7890AbCdEf1234567890aBcDeF12");
+      return;
+    }
+
+    // No injected provider: on mobile, open MetaMask app deep link.
+    if (isMobileBrowser()) {
+      openMetaMaskDeepLink();
     }
   }, []);
 
