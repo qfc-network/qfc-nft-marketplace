@@ -1,17 +1,37 @@
 "use client";
 
 import { useState } from "react";
+import { Contract, parseEther } from "ethers";
 import { useWallet } from "@/context/WalletContext";
 import NFTCard from "@/components/NFTCard";
 import PriceInput from "@/components/PriceInput";
 import { NFTS } from "@/lib/mock-data";
+import {
+  QRC_MARKETPLACE_ABI,
+  AUCTION_HOUSE_ABI,
+  QFC_COLLECTION_ABI,
+  MARKETPLACE_ADDRESS,
+  AUCTION_ADDRESS,
+} from "@/lib/contracts";
+
+type TxStatus = "idle" | "approving" | "pending" | "confirming" | "success" | "error";
 
 export default function ListPage() {
-  const { address, isConnected, connect } = useWallet();
+  const { address, isConnected, connect, signer } = useWallet();
   const [selectedNFT, setSelectedNFT] = useState<number | null>(null);
+  const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
   const [listingType, setListingType] = useState<"fixed" | "auction">("fixed");
   const [price, setPrice] = useState("");
   const [duration, setDuration] = useState("24");
+
+  const [txStatus, setTxStatus] = useState<TxStatus>("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // For manual NFT entry when user has real NFTs not in mock data
+  const [manualAddress, setManualAddress] = useState("");
+  const [manualTokenId, setManualTokenId] = useState("");
+  const [useManual, setUseManual] = useState(false);
 
   if (!isConnected) {
     return (
@@ -30,45 +50,212 @@ export default function ListPage() {
   }
 
   const ownedNFTs = NFTS.filter((n) => n.owner === address && !n.listed);
-  const handleSubmit = () => {
-    alert(`Listing submitted! Type: ${listingType}, Price: ${price} QFC${listingType === "auction" ? `, Duration: ${duration}h` : ""}`);
-    setSelectedNFT(null);
-    setPrice("");
+
+  const handleSubmit = async () => {
+    setErrorMsg(null);
+    setTxHash(null);
+
+    if (!signer) {
+      setErrorMsg("Wallet not connected.");
+      return;
+    }
+
+    // Determine NFT contract address and token ID
+    let nftAddress: string;
+    let tokenId: bigint;
+
+    if (useManual) {
+      if (!manualAddress || !manualTokenId) {
+        setErrorMsg("Please enter the NFT contract address and token ID.");
+        return;
+      }
+      nftAddress = manualAddress;
+      tokenId = BigInt(manualTokenId);
+    } else if (selectedNFT !== null && selectedCollection) {
+      nftAddress = selectedCollection;
+      tokenId = BigInt(selectedNFT);
+    } else {
+      setErrorMsg("Please select an NFT to list.");
+      return;
+    }
+
+    const priceWei = parseEther(price);
+
+    try {
+      // Step 1: Approve the marketplace/auction contract
+      setTxStatus("approving");
+
+      const nftContract = new Contract(nftAddress, QFC_COLLECTION_ABI, signer);
+      const operatorAddress = listingType === "fixed" ? MARKETPLACE_ADDRESS : AUCTION_ADDRESS;
+
+      if (!operatorAddress) {
+        setErrorMsg("Marketplace/Auction contract address not configured.");
+        setTxStatus("error");
+        return;
+      }
+
+      // Check if already approved
+      const signerAddress = await signer.getAddress();
+      const isApproved = await nftContract.isApprovedForAll(signerAddress, operatorAddress);
+
+      if (!isApproved) {
+        const approveTx = await nftContract.setApprovalForAll(operatorAddress, true);
+        await approveTx.wait();
+      }
+
+      // Step 2: List or create auction
+      setTxStatus("pending");
+
+      if (listingType === "fixed") {
+        const marketplace = new Contract(MARKETPLACE_ADDRESS, QRC_MARKETPLACE_ABI, signer);
+        const tx = await marketplace.listNFT(nftAddress, tokenId, priceWei);
+        setTxHash(tx.hash);
+        setTxStatus("confirming");
+        await tx.wait();
+      } else {
+        const auctionHouse = new Contract(AUCTION_ADDRESS, AUCTION_HOUSE_ABI, signer);
+        const durationSeconds = BigInt(parseInt(duration) * 3600);
+        // reservePrice = startPrice for simplicity
+        const tx = await auctionHouse.createEnglishAuction(
+          nftAddress,
+          tokenId,
+          priceWei,       // startPrice
+          priceWei,       // reservePrice (same as start)
+          durationSeconds
+        );
+        setTxHash(tx.hash);
+        setTxStatus("confirming");
+        await tx.wait();
+      }
+
+      setTxStatus("success");
+      setSelectedNFT(null);
+      setSelectedCollection(null);
+      setPrice("");
+    } catch (err: unknown) {
+      setTxStatus("error");
+      const message = (err as { reason?: string; message?: string })?.reason
+        || (err as { message?: string })?.message
+        || "Transaction failed";
+      setErrorMsg(message);
+    }
   };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <h1 className="mb-8 text-3xl font-bold">List an NFT</h1>
 
-      {/* Owned NFTs */}
-      <div className="mb-8">
-        <h2 className="mb-4 text-lg font-semibold text-gray-300">Select an NFT to list</h2>
-        {ownedNFTs.length === 0 ? (
-          <div className="rounded-xl border border-gray-800 bg-gray-800/30 py-12 text-center">
-            <p className="text-4xl mb-3">📭</p>
-            <p className="text-gray-400">No unlisted NFTs in your wallet</p>
-          </div>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {ownedNFTs.map((nft) => (
-              <div
-                key={`${nft.collectionAddress}-${nft.tokenId}`}
-                onClick={() => setSelectedNFT(selectedNFT === nft.tokenId ? null : nft.tokenId)}
-                className={`cursor-pointer rounded-xl border-2 transition ${
-                  selectedNFT === nft.tokenId
-                    ? "border-purple-500 shadow-lg shadow-purple-500/20"
-                    : "border-transparent"
-                }`}
-              >
-                <NFTCard nft={nft} />
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Transaction status feedback */}
+      {txStatus === "approving" && (
+        <div className="mb-6 rounded-lg border border-yellow-600/50 bg-yellow-600/10 p-4 text-yellow-400">
+          <p className="font-medium">Approving marketplace access... Please confirm in your wallet.</p>
+        </div>
+      )}
+      {txStatus === "confirming" && (
+        <div className="mb-6 rounded-lg border border-yellow-600/50 bg-yellow-600/10 p-4 text-yellow-400">
+          <p className="font-medium">Transaction submitted, waiting for confirmation...</p>
+          {txHash && <p className="mt-1 text-sm break-all">Tx: {txHash}</p>}
+        </div>
+      )}
+      {txStatus === "success" && (
+        <div className="mb-6 rounded-lg border border-green-600/50 bg-green-600/10 p-4 text-green-400">
+          <p className="font-medium">NFT listed successfully!</p>
+          {txHash && <p className="mt-1 text-sm break-all">Tx: {txHash}</p>}
+        </div>
+      )}
+      {txStatus === "error" && errorMsg && (
+        <div className="mb-6 rounded-lg border border-red-600/50 bg-red-600/10 p-4 text-red-400">
+          <p className="font-medium">Transaction failed</p>
+          <p className="mt-1 text-sm break-all">{errorMsg}</p>
+        </div>
+      )}
+
+      {/* Toggle between mock NFTs and manual entry */}
+      <div className="mb-6 flex gap-2">
+        <button
+          onClick={() => setUseManual(false)}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+            !useManual ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+          }`}
+        >
+          My NFTs
+        </button>
+        <button
+          onClick={() => setUseManual(true)}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+            useManual ? "bg-purple-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"
+          }`}
+        >
+          Enter Manually
+        </button>
       </div>
 
+      {!useManual && (
+        <div className="mb-8">
+          <h2 className="mb-4 text-lg font-semibold text-gray-300">Select an NFT to list</h2>
+          {ownedNFTs.length === 0 ? (
+            <div className="rounded-xl border border-gray-800 bg-gray-800/30 py-12 text-center">
+              <p className="text-4xl mb-3">📭</p>
+              <p className="text-gray-400">No unlisted NFTs in your wallet</p>
+              <p className="mt-2 text-sm text-gray-500">Try &quot;Enter Manually&quot; if you have NFTs on-chain.</p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              {ownedNFTs.map((nft) => (
+                <div
+                  key={`${nft.collectionAddress}-${nft.tokenId}`}
+                  onClick={() => {
+                    if (selectedNFT === nft.tokenId && selectedCollection === nft.collectionAddress) {
+                      setSelectedNFT(null);
+                      setSelectedCollection(null);
+                    } else {
+                      setSelectedNFT(nft.tokenId);
+                      setSelectedCollection(nft.collectionAddress);
+                    }
+                  }}
+                  className={`cursor-pointer rounded-xl border-2 transition ${
+                    selectedNFT === nft.tokenId && selectedCollection === nft.collectionAddress
+                      ? "border-purple-500 shadow-lg shadow-purple-500/20"
+                      : "border-transparent"
+                  }`}
+                >
+                  <NFTCard nft={nft} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {useManual && (
+        <div className="mb-8 space-y-4 rounded-xl border border-gray-800 bg-gray-800/30 p-6">
+          <h2 className="text-lg font-semibold text-gray-300">Enter NFT Details</h2>
+          <div>
+            <label className="mb-1 block text-sm text-gray-400">NFT Contract Address</label>
+            <input
+              type="text"
+              value={manualAddress}
+              onChange={(e) => setManualAddress(e.target.value)}
+              placeholder="0x..."
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-gray-400">Token ID</label>
+            <input
+              type="number"
+              min="0"
+              value={manualTokenId}
+              onChange={(e) => setManualTokenId(e.target.value)}
+              placeholder="e.g. 1"
+              className="w-full rounded-lg border border-gray-700 bg-gray-800 px-4 py-2 text-white outline-none placeholder:text-gray-500 focus:border-purple-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            />
+          </div>
+        </div>
+      )}
+
       {/* Listing Form */}
-      {selectedNFT !== null && (
+      {(selectedNFT !== null || useManual) && (
         <div className="mx-auto max-w-lg rounded-xl border border-gray-800 bg-gray-800/30 p-6">
           <h2 className="mb-6 text-xl font-bold">Listing Details</h2>
 
@@ -122,10 +309,18 @@ export default function ListPage() {
 
             <button
               onClick={handleSubmit}
-              disabled={!price || parseFloat(price) <= 0}
+              disabled={!price || parseFloat(price) <= 0 || txStatus === "approving" || txStatus === "pending" || txStatus === "confirming"}
               className="mt-4 w-full rounded-xl bg-purple-600 py-3 font-medium text-white hover:bg-purple-700 transition disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {listingType === "fixed" ? "List for Sale" : "Start Auction"}
+              {txStatus === "approving"
+                ? "Approving..."
+                : txStatus === "pending"
+                ? "Submitting..."
+                : txStatus === "confirming"
+                ? "Confirming..."
+                : listingType === "fixed"
+                ? "List for Sale"
+                : "Start Auction"}
             </button>
           </div>
         </div>

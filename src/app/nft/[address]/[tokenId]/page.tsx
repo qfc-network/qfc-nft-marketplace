@@ -1,19 +1,31 @@
 "use client";
 
+import { useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
+import { Contract, parseEther } from "ethers";
 import { useWallet } from "@/context/WalletContext";
 import ActivityTable from "@/components/ActivityTable";
 import {
   NFTS, ACTIVITIES, MOCK_OFFERS,
   formatQFC, formatUSD, shortenAddress, timeAgo,
 } from "@/lib/mock-data";
+import {
+  QRC_MARKETPLACE_ABI,
+  MARKETPLACE_ADDRESS,
+} from "@/lib/contracts";
+
+type TxStatus = "idle" | "pending" | "confirming" | "success" | "error";
 
 export default function NFTDetailPage() {
   const params = useParams();
   const address = params.address as string;
   const tokenId = parseInt(params.tokenId as string);
-  const { isConnected, connect } = useWallet();
+  const { isConnected, connect, signer } = useWallet();
+
+  const [txStatus, setTxStatus] = useState<TxStatus>("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const nft = NFTS.find((n) => n.collectionAddress === address && n.tokenId === tokenId);
   const nftActivities = ACTIVITIES.filter(
@@ -28,6 +40,45 @@ export default function NFTDetailPage() {
       </div>
     );
   }
+
+  const handleBuy = async () => {
+    if (!isConnected) {
+      connect();
+      return;
+    }
+
+    if (!signer || !MARKETPLACE_ADDRESS) {
+      setErrorMsg("Wallet not connected or marketplace address not configured.");
+      return;
+    }
+
+    if (!nft.price) return;
+
+    setErrorMsg(null);
+    setTxHash(null);
+
+    try {
+      setTxStatus("pending");
+
+      const marketplace = new Contract(MARKETPLACE_ADDRESS, QRC_MARKETPLACE_ABI, signer);
+      const priceWei = parseEther(nft.price.toString());
+
+      const tx = await marketplace.buyNFT(nft.collectionAddress, BigInt(nft.tokenId), {
+        value: priceWei,
+      });
+
+      setTxHash(tx.hash);
+      setTxStatus("confirming");
+      await tx.wait();
+      setTxStatus("success");
+    } catch (err: unknown) {
+      setTxStatus("error");
+      const message = (err as { reason?: string; message?: string })?.reason
+        || (err as { message?: string })?.message
+        || "Transaction failed";
+      setErrorMsg(message);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -55,6 +106,26 @@ export default function NFTDetailPage() {
             Owned by <span className="text-purple-400">{shortenAddress(nft.owner)}</span>
           </p>
 
+          {/* Transaction status feedback */}
+          {txStatus === "confirming" && (
+            <div className="mt-4 rounded-lg border border-yellow-600/50 bg-yellow-600/10 p-4 text-yellow-400">
+              <p className="font-medium">Transaction submitted, waiting for confirmation...</p>
+              {txHash && <p className="mt-1 text-sm break-all">Tx: {txHash}</p>}
+            </div>
+          )}
+          {txStatus === "success" && (
+            <div className="mt-4 rounded-lg border border-green-600/50 bg-green-600/10 p-4 text-green-400">
+              <p className="font-medium">Purchase successful! The NFT is now yours.</p>
+              {txHash && <p className="mt-1 text-sm break-all">Tx: {txHash}</p>}
+            </div>
+          )}
+          {txStatus === "error" && errorMsg && (
+            <div className="mt-4 rounded-lg border border-red-600/50 bg-red-600/10 p-4 text-red-400">
+              <p className="font-medium">Transaction failed</p>
+              <p className="mt-1 text-sm break-all">{errorMsg}</p>
+            </div>
+          )}
+
           {/* Price & Buy */}
           {nft.listed && nft.price && (
             <div className="mt-6 rounded-xl border border-gray-800 bg-gray-800/30 p-6">
@@ -62,10 +133,17 @@ export default function NFTDetailPage() {
               <p className="mt-1 text-3xl font-bold text-purple-400">{formatQFC(nft.price)}</p>
               <p className="text-sm text-gray-500">{formatUSD(nft.price)}</p>
               <button
-                onClick={() => !isConnected && connect()}
-                className="mt-4 w-full rounded-xl bg-purple-600 py-3 font-medium text-white hover:bg-purple-700 transition"
+                onClick={handleBuy}
+                disabled={txStatus === "pending" || txStatus === "confirming"}
+                className="mt-4 w-full rounded-xl bg-purple-600 py-3 font-medium text-white hover:bg-purple-700 transition disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {isConnected ? "Buy Now" : "Connect Wallet to Buy"}
+                {!isConnected
+                  ? "Connect Wallet to Buy"
+                  : txStatus === "pending"
+                  ? "Submitting..."
+                  : txStatus === "confirming"
+                  ? "Confirming..."
+                  : "Buy Now"}
               </button>
             </div>
           )}
