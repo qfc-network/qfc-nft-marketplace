@@ -161,8 +161,8 @@ export async function fetchCollections(): Promise<OnChainCollection[]> {
  * but does not expose an enumeration function. For now this returns an empty
  * array. Wire up once an indexer / event-log scanner is available.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function fetchListedNFTs(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _collectionAddress?: string,
 ): Promise<NFTDetail[]> {
   // TODO: Implement via indexer / subgraph. The on-chain `listings` mapping
@@ -214,8 +214,8 @@ export async function fetchNFTDetail(
  * indexer we would need to scan every collection's balanceOf / tokenOfOwnerByIndex,
  * which is expensive. Returns an empty array until an indexer is available.
  */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function fetchUserNFTs(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   _userAddress: string,
 ): Promise<NFTDetail[]> {
   // TODO: Implement via indexer or subgraph. Enumerating across all
