@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { BrowserProvider, Contract, JsonRpcProvider } from "ethers";
-import type { Signer, Provider, ContractRunner } from "ethers";
+import type { Signer, ContractRunner } from "ethers";
 
 import {
   QRC_MARKETPLACE_ABI,
@@ -161,6 +161,7 @@ export async function fetchCollections(): Promise<OnChainCollection[]> {
  * but does not expose an enumeration function. For now this returns an empty
  * array. Wire up once an indexer / event-log scanner is available.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function fetchListedNFTs(
   _collectionAddress?: string,
 ): Promise<NFTDetail[]> {
@@ -213,6 +214,7 @@ export async function fetchNFTDetail(
  * indexer we would need to scan every collection's balanceOf / tokenOfOwnerByIndex,
  * which is expensive. Returns an empty array until an indexer is available.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export async function fetchUserNFTs(
   _userAddress: string,
 ): Promise<NFTDetail[]> {
