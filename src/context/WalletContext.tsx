@@ -78,8 +78,9 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [signer, setSigner] = useState<JsonRpcSigner | null>(null);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const getEth = (): any => // eslint-disable-line @typescript-eslint/no-explicit-any
-    typeof window !== "undefined" ? (window as Record<string, unknown>).ethereum : null;
+  const getEth = (): any =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    typeof window !== "undefined" ? (window as any).ethereum : null;
 
   const setupProviderAndSigner = useCallback(async (account: string) => {
     const eth = getEth();
