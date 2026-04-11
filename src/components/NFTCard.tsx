@@ -13,11 +13,13 @@ export default function NFTCard({ nft }: { nft: NFT }) {
         className="flex h-48 items-center justify-center text-6xl"
         style={{ backgroundColor: nft.bgColor + "33" }}
       >
-        <span className="transition-transform group-hover:scale-110">{nft.emoji}</span>
+        <span className="transition-transform group-hover:scale-110">
+          {nft.emoji || <span className="text-5xl font-bold text-white/40">{nft.name.charAt(0).toUpperCase()}</span>}
+        </span>
       </div>
       <div className="p-4">
         <p className="text-xs text-gray-400">{nft.collection}</p>
-        <p className="mt-1 font-semibold text-white">{nft.name} #{nft.tokenId}</p>
+        <p className="mt-1 font-semibold text-white">{nft.name}</p>
         <div className="mt-3 flex items-center justify-between">
           {nft.price ? (
             <div>
@@ -29,10 +31,12 @@ export default function NFTCard({ nft }: { nft: NFT }) {
               <p className="text-xs text-gray-400">Not listed</p>
             </div>
           )}
-          <div className="text-right">
-            <p className="text-xs text-gray-400">Rarity</p>
-            <p className="text-sm font-medium text-yellow-400">{nft.rarity}</p>
-          </div>
+          {nft.rarity > 0 && (
+            <div className="text-right">
+              <p className="text-xs text-gray-400">Rarity</p>
+              <p className="text-sm font-medium text-yellow-400">{nft.rarity}</p>
+            </div>
+          )}
         </div>
       </div>
     </Link>

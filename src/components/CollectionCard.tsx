@@ -13,7 +13,9 @@ export default function CollectionCard({ collection }: { collection: Collection 
         className="flex h-28 items-center justify-center"
         style={{ backgroundColor: collection.bannerColor + "44" }}
       >
-        <span className="text-5xl">{collection.emoji}</span>
+        <span className="text-5xl">
+          {collection.emoji || <span className="text-4xl font-bold text-white/40">{collection.name.charAt(0).toUpperCase()}</span>}
+        </span>
       </div>
       <div className="p-4">
         <h3 className="font-semibold text-white">{collection.name}</h3>

@@ -6,6 +6,7 @@ import { useWallet } from "@/context/WalletContext";
 import NFTCard from "@/components/NFTCard";
 import PriceInput from "@/components/PriceInput";
 import { NFTS } from "@/lib/mock-data";
+import { useOwnedNFTs } from "@/hooks/useBlockchain";
 import {
   QRC_MARKETPLACE_ABI,
   AUCTION_HOUSE_ABI,
@@ -20,8 +21,9 @@ export default function ListPage() {
   const { address, isConnected, connect, signer } = useWallet();
   const [selectedNFT, setSelectedNFT] = useState<number | null>(null);
   const [selectedCollection, setSelectedCollection] = useState<string | null>(null);
-  const [listingType, setListingType] = useState<"fixed" | "auction">("fixed");
+  const [listingType, setListingType] = useState<"fixed" | "english" | "dutch">("fixed");
   const [price, setPrice] = useState("");
+  const [endPrice, setEndPrice] = useState("");
   const [duration, setDuration] = useState("24");
 
   const [txStatus, setTxStatus] = useState<TxStatus>("idle");
@@ -32,6 +34,10 @@ export default function ListPage() {
   const [manualAddress, setManualAddress] = useState("");
   const [manualTokenId, setManualTokenId] = useState("");
   const [useManual, setUseManual] = useState(false);
+
+  const { data: onChainOwned, loading: ownedLoading } = useOwnedNFTs(address);
+  const mockOwned = NFTS.filter((n) => n.owner === address && !n.listed);
+  const ownedNFTs = (onChainOwned?.length ? onChainOwned : mockOwned).filter((n) => !n.listed);
 
   if (!isConnected) {
     return (
@@ -48,8 +54,6 @@ export default function ListPage() {
       </div>
     );
   }
-
-  const ownedNFTs = NFTS.filter((n) => n.owner === address && !n.listed);
 
   const handleSubmit = async () => {
     setErrorMsg(null);
@@ -86,7 +90,8 @@ export default function ListPage() {
       setTxStatus("approving");
 
       const nftContract = new Contract(nftAddress, QFC_COLLECTION_ABI, signer);
-      const operatorAddress = listingType === "fixed" ? MARKETPLACE_ADDRESS : AUCTION_ADDRESS;
+      const isAuction = listingType === "english" || listingType === "dutch";
+      const operatorAddress = isAuction ? AUCTION_ADDRESS : MARKETPLACE_ADDRESS;
 
       if (!operatorAddress) {
         setErrorMsg("Marketplace/Auction contract address not configured.");
@@ -112,15 +117,29 @@ export default function ListPage() {
         setTxHash(tx.hash);
         setTxStatus("confirming");
         await tx.wait();
-      } else {
+      } else if (listingType === "english") {
         const auctionHouse = new Contract(AUCTION_ADDRESS, AUCTION_HOUSE_ABI, signer);
         const durationSeconds = BigInt(parseInt(duration) * 3600);
-        // reservePrice = startPrice for simplicity
         const tx = await auctionHouse.createEnglishAuction(
           nftAddress,
           tokenId,
           priceWei,       // startPrice
           priceWei,       // reservePrice (same as start)
+          durationSeconds
+        );
+        setTxHash(tx.hash);
+        setTxStatus("confirming");
+        await tx.wait();
+      } else {
+        // Dutch auction
+        const auctionHouse = new Contract(AUCTION_ADDRESS, AUCTION_HOUSE_ABI, signer);
+        const durationSeconds = BigInt(parseInt(duration) * 3600);
+        const endPriceWei = parseEther(endPrice || "0");
+        const tx = await auctionHouse.createDutchAuction(
+          nftAddress,
+          tokenId,
+          priceWei,       // startPrice (high)
+          endPriceWei,    // endPrice (low)
           durationSeconds
         );
         setTxHash(tx.hash);
@@ -193,7 +212,13 @@ export default function ListPage() {
       {!useManual && (
         <div className="mb-8">
           <h2 className="mb-4 text-lg font-semibold text-gray-300">Select an NFT to list</h2>
-          {ownedNFTs.length === 0 ? (
+          {ownedLoading ? (
+            <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="h-64 animate-pulse rounded-xl bg-gray-800/50" />
+              ))}
+            </div>
+          ) : ownedNFTs.length === 0 ? (
             <div className="rounded-xl border border-gray-800 bg-gray-800/30 py-12 text-center">
               <p className="text-4xl mb-3">📭</p>
               <p className="text-gray-400">No unlisted NFTs in your wallet</p>
@@ -259,39 +284,50 @@ export default function ListPage() {
         <div className="mx-auto max-w-lg rounded-xl border border-gray-800 bg-gray-800/30 p-6">
           <h2 className="mb-6 text-xl font-bold">Listing Details</h2>
 
-          <div className="mb-6 flex gap-2">
-            <button
-              onClick={() => setListingType("fixed")}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                listingType === "fixed"
-                  ? "bg-purple-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:text-white"
-              }`}
-            >
-              Fixed Price
-            </button>
-            <button
-              onClick={() => setListingType("auction")}
-              className={`flex-1 rounded-lg py-2 text-sm font-medium transition ${
-                listingType === "auction"
-                  ? "bg-purple-600 text-white"
-                  : "bg-gray-800 text-gray-400 hover:text-white"
-              }`}
-            >
-              Auction
-            </button>
+          <div className="mb-6 flex gap-1 rounded-lg bg-gray-800/50 p-1">
+            {([
+              { id: "fixed" as const, label: "Fixed Price" },
+              { id: "english" as const, label: "English Auction" },
+              { id: "dutch" as const, label: "Dutch Auction" },
+            ]).map((opt) => (
+              <button
+                key={opt.id}
+                onClick={() => setListingType(opt.id)}
+                className={`flex-1 rounded-md py-2 text-xs font-medium transition ${
+                  listingType === opt.id
+                    ? "bg-purple-600 text-white"
+                    : "text-gray-400 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
 
           <div className="space-y-4">
             <PriceInput
               value={price}
               onChange={setPrice}
-              label={listingType === "fixed" ? "Listing Price" : "Starting Price"}
+              label={
+                listingType === "fixed"
+                  ? "Listing Price"
+                  : listingType === "dutch"
+                  ? "Start Price (high)"
+                  : "Starting Price"
+              }
             />
 
-            {listingType === "auction" && (
+            {listingType === "dutch" && (
+              <PriceInput
+                value={endPrice}
+                onChange={setEndPrice}
+                label="End Price (low)"
+              />
+            )}
+
+            {(listingType === "english" || listingType === "dutch") && (
               <div>
-                <label className="mb-1 block text-sm text-gray-400">Duration (hours)</label>
+                <label className="mb-1 block text-sm text-gray-400">Duration</label>
                 <select
                   value={duration}
                   onChange={(e) => setDuration(e.target.value)}
@@ -307,9 +343,19 @@ export default function ListPage() {
               </div>
             )}
 
+            {listingType === "dutch" && (
+              <p className="text-xs text-gray-500">
+                Price decreases linearly from start to end over the duration. First buyer wins.
+              </p>
+            )}
+
             <button
               onClick={handleSubmit}
-              disabled={!price || parseFloat(price) <= 0 || txStatus === "approving" || txStatus === "pending" || txStatus === "confirming"}
+              disabled={
+                !price || parseFloat(price) <= 0
+                || (listingType === "dutch" && (!endPrice || parseFloat(endPrice) <= 0 || parseFloat(endPrice) >= parseFloat(price)))
+                || txStatus === "approving" || txStatus === "pending" || txStatus === "confirming"
+              }
               className="mt-4 w-full rounded-xl bg-purple-600 py-3 font-medium text-white hover:bg-purple-700 transition disabled:cursor-not-allowed disabled:opacity-50"
             >
               {txStatus === "approving"
@@ -320,7 +366,9 @@ export default function ListPage() {
                 ? "Confirming..."
                 : listingType === "fixed"
                 ? "List for Sale"
-                : "Start Auction"}
+                : listingType === "english"
+                ? "Start English Auction"
+                : "Start Dutch Auction"}
             </button>
           </div>
         </div>

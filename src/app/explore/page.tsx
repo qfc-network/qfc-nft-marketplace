@@ -1,8 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import NFTCard from "@/components/NFTCard";
+import { useCollections } from "@/hooks/useBlockchain";
 import { NFTS, COLLECTIONS } from "@/lib/mock-data";
+import { FACTORY_ADDRESS } from "@/lib/contracts";
+import { fetchCollectionNFTs } from "@/lib/blockchain";
+import type { NFT, Collection } from "@/lib/mock-data";
 
 type SortOption = "price-asc" | "price-desc" | "recent" | "rarity";
 
@@ -13,8 +17,45 @@ export default function ExplorePage() {
   const [maxPrice, setMaxPrice] = useState("");
   const [sort, setSort] = useState<SortOption>("recent");
 
+  const hasContracts = !!FACTORY_ADDRESS;
+  const { data: onChainCollections, loading: colLoading } = useCollections();
+
+  const [onChainNFTs, setOnChainNFTs] = useState<NFT[]>([]);
+  const [nftLoading, setNftLoading] = useState(true);
+
+  const collections: Collection[] =
+    hasContracts && onChainCollections?.length ? onChainCollections : COLLECTIONS;
+
+  // Fetch NFTs from all collections
+  useEffect(() => {
+    if (!hasContracts || !onChainCollections?.length) {
+      setNftLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setNftLoading(true);
+    Promise.all(
+      onChainCollections.map((c) => fetchCollectionNFTs(c.address, c.name))
+    )
+      .then((results) => {
+        if (!cancelled) {
+          setOnChainNFTs(results.flat());
+          setNftLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setNftLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [hasContracts, onChainCollections]);
+
+  const allNFTs = hasContracts && onChainNFTs.length ? onChainNFTs : NFTS;
+  const loading = hasContracts && (colLoading || nftLoading);
+
   const filtered = useMemo(() => {
-    let results = [...NFTS];
+    let results = [...allNFTs];
 
     if (search) {
       const q = search.toLowerCase();
@@ -53,7 +94,7 @@ export default function ExplorePage() {
     }
 
     return results;
-  }, [search, selectedCollection, minPrice, maxPrice, sort]);
+  }, [allNFTs, search, selectedCollection, minPrice, maxPrice, sort]);
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
@@ -76,7 +117,7 @@ export default function ExplorePage() {
           className="rounded-lg border border-gray-700 bg-gray-800 px-3 py-2 text-white outline-none focus:border-purple-500"
         >
           <option value="">All Collections</option>
-          {COLLECTIONS.map((c) => (
+          {collections.map((c) => (
             <option key={c.address} value={c.address}>{c.name}</option>
           ))}
         </select>
@@ -109,7 +150,13 @@ export default function ExplorePage() {
       </div>
 
       {/* Results */}
-      {filtered.length === 0 ? (
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="h-64 animate-pulse rounded-xl bg-gray-800/50" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="py-20 text-center text-gray-500">
           <p className="text-4xl mb-4">🔍</p>
           <p>No NFTs found matching your filters</p>

@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useParams } from "next/navigation";
 import NFTCard from "@/components/NFTCard";
-import { NFTS, ACTIVITIES, MOCK_OFFERS, shortenAddress, formatQFC, timeAgo } from "@/lib/mock-data";
+import { useOwnedNFTs } from "@/hooks/useBlockchain";
+import { NFTS, MOCK_OFFERS, shortenAddress, formatQFC } from "@/lib/mock-data";
 
 type Tab = "owned" | "listed" | "offers";
 
@@ -12,9 +13,12 @@ export default function ProfilePage() {
   const address = params.address as string;
   const [tab, setTab] = useState<Tab>("owned");
 
-  const owned = NFTS.filter((n) => n.owner === address);
-  const listed = NFTS.filter((n) => n.owner === address && n.listed);
-  const userActivities = ACTIVITIES.filter((a) => a.from === address || a.to === address);
+  const { data: onChainOwned, loading } = useOwnedNFTs(address);
+
+  // Fall back to mock data
+  const mockOwned = NFTS.filter((n) => n.owner === address);
+  const owned = onChainOwned?.length ? onChainOwned : mockOwned;
+  const listed = owned.filter((n) => n.listed);
 
   const tabs: { id: Tab; label: string; count: number }[] = [
     { id: "owned", label: "Owned", count: owned.length },
@@ -37,15 +41,15 @@ export default function ProfilePage() {
         </div>
         <div className="mt-4 grid grid-cols-3 gap-4 text-center">
           <div>
-            <p className="text-2xl font-bold text-purple-400">{owned.length}</p>
+            <p className="text-2xl font-bold text-purple-400">{loading ? "..." : owned.length}</p>
             <p className="text-sm text-gray-400">Owned</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-green-400">{listed.length}</p>
+            <p className="text-2xl font-bold text-green-400">{loading ? "..." : listed.length}</p>
             <p className="text-sm text-gray-400">Listed</p>
           </div>
           <div>
-            <p className="text-2xl font-bold text-blue-400">{userActivities.length}</p>
+            <p className="text-2xl font-bold text-blue-400">-</p>
             <p className="text-sm text-gray-400">Transactions</p>
           </div>
         </div>
@@ -61,61 +65,71 @@ export default function ProfilePage() {
               tab === t.id ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
             }`}
           >
-            {t.label} ({t.count})
+            {t.label} ({loading ? "..." : t.count})
           </button>
         ))}
       </div>
 
       {/* Tab Content */}
-      {tab === "owned" && (
-        owned.length === 0 ? (
-          <p className="py-12 text-center text-gray-500">No NFTs owned</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {owned.map((nft) => (
-              <NFTCard key={`${nft.collectionAddress}-${nft.tokenId}`} nft={nft} />
-            ))}
-          </div>
-        )
-      )}
-
-      {tab === "listed" && (
-        listed.length === 0 ? (
-          <p className="py-12 text-center text-gray-500">No active listings</p>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {listed.map((nft) => (
-              <NFTCard key={`${nft.collectionAddress}-${nft.tokenId}`} nft={nft} />
-            ))}
-          </div>
-        )
-      )}
-
-      {tab === "offers" && (
-        <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-800/30 p-4">
-          {MOCK_OFFERS.length === 0 ? (
-            <p className="py-4 text-center text-gray-500">No offers</p>
-          ) : (
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-800 text-left text-gray-400">
-                  <th className="pb-3 pr-4">From</th>
-                  <th className="pb-3 pr-4">Amount</th>
-                  <th className="pb-3">Expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {MOCK_OFFERS.map((offer, i) => (
-                  <tr key={i} className="border-b border-gray-800/50">
-                    <td className="py-3 pr-4 text-gray-300">{shortenAddress(offer.from)}</td>
-                    <td className="py-3 pr-4 text-purple-400">{formatQFC(offer.amount)}</td>
-                    <td className="py-3 text-gray-500">{timeAgo(offer.expiry)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
+      {loading ? (
+        <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-64 animate-pulse rounded-xl bg-gray-800/50" />
+          ))}
         </div>
+      ) : (
+        <>
+          {tab === "owned" && (
+            owned.length === 0 ? (
+              <p className="py-12 text-center text-gray-500">No NFTs owned</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {owned.map((nft) => (
+                  <NFTCard key={`${nft.collectionAddress}-${nft.tokenId}`} nft={nft} />
+                ))}
+              </div>
+            )
+          )}
+
+          {tab === "listed" && (
+            listed.length === 0 ? (
+              <p className="py-12 text-center text-gray-500">No active listings</p>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+                {listed.map((nft) => (
+                  <NFTCard key={`${nft.collectionAddress}-${nft.tokenId}`} nft={nft} />
+                ))}
+              </div>
+            )
+          )}
+
+          {tab === "offers" && (
+            <div className="overflow-x-auto rounded-xl border border-gray-800 bg-gray-800/30 p-4">
+              {MOCK_OFFERS.length === 0 ? (
+                <p className="py-4 text-center text-gray-500">No offers</p>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-800 text-left text-gray-400">
+                      <th className="pb-3 pr-4">From</th>
+                      <th className="pb-3 pr-4">Amount</th>
+                      <th className="pb-3">Expires</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {MOCK_OFFERS.map((offer, i) => (
+                      <tr key={i} className="border-b border-gray-800/50">
+                        <td className="py-3 pr-4 text-gray-300">{shortenAddress(offer.from)}</td>
+                        <td className="py-3 pr-4 text-purple-400">{formatQFC(offer.amount)}</td>
+                        <td className="py-3 text-gray-500">{new Date(offer.expiry).toLocaleDateString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
